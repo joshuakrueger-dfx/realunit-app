@@ -46,7 +46,7 @@
   "completed": "Abgeschlossen",
   "confirm": "Bestätigen",
   "connectBitboxCheckPairingCode": "Überprüfen Sie, ob dieser Code mit dem auf Ihrem BitBox-Gerät angezeigten übereinstimmt, und bestätigen Sie anschließend.",
-  "connectBitboxConnecting": "Gerät gefunden. Bitte überprüfen Sie Ihre Bitbox, befolgen Sie die Anweisungen und merken Sie sich den angezeigten Kopplungscode.",
+  "connectBitboxConnecting": "Gerät gefunden. Auf Ihrer BitBox erscheint in Kürze ein Kopplungscode. Bitte lassen Sie ihn stehen – derselbe Code erscheint anschließend auch hier zum Vergleich.",
   "connectBitboxContent": "Bitte verbinden Sie Ihre BitBox02 mit Ihrem Smartphone.",
   "connectBitboxContentIos": "Bitte verbinden Sie Ihre BitBox02 mit Ihrem Smartphone und aktivieren Sie zusätzlich Bluetooth.",
   "connectBitboxFailed": "Es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.",

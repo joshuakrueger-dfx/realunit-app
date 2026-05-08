@@ -23,9 +23,11 @@ class ConnectBitboxCubit extends Cubit<BitboxConnectionState> {
   final BitboxService _service;
   final WalletService _walletService;
   Timer? _checkForTimer;
+  Future<bool>? _pendingInit;
 
   Future<void> checkForBitbox() async {
     final devices = await _service.getAllUsbDevices();
+    if (isClosed) return;
     if (devices.isNotEmpty) {
       emit(BitboxFound(devices.first));
       _checkForTimer?.cancel();
@@ -37,11 +39,40 @@ class ConnectBitboxCubit extends Cubit<BitboxConnectionState> {
     if (state is BitboxConnecting) return;
     emit(BitboxConnecting(device));
     try {
-      await _service.init(device);
-      final channelHash = await _service.getChannelHash();
+      var initFailed = false;
+      _pendingInit = _service
+          .init(device)
+          .then((success) {
+            if (!success) initFailed = true;
+            return success;
+          })
+          .catchError((Object e) {
+            developer.log('init error: $e', name: '$ConnectBitboxCubit');
+            initFailed = true;
+            return false;
+          });
+
+      String channelHash = '';
+      final deadline = DateTime.now().add(const Duration(seconds: 90));
+      while (channelHash.isEmpty && DateTime.now().isBefore(deadline) && !isClosed) {
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (isClosed) return;
+        if (initFailed) throw Exception('init failed');
+        try {
+          final hash = await _service.getChannelHash().timeout(const Duration(seconds: 2));
+          if (hash.isNotEmpty) channelHash = hash;
+        } catch (_) {}
+      }
+
+      if (isClosed) return;
+
+      if (channelHash.isEmpty) throw TimeoutException('no channel hash within 90s');
+
       emit(BitboxCheckHash(device, channelHash));
     } catch (e) {
       developer.log(e.toString(), name: '$ConnectBitboxCubit');
+      _pendingInit = null;
+      if (isClosed) return;
       emit(BitboxNotConnected());
       _checkForTimer = Timer.periodic(const Duration(milliseconds: 500), (_) => checkForBitbox());
     }
@@ -53,12 +84,19 @@ class ConnectBitboxCubit extends Cubit<BitboxConnectionState> {
 
     try {
       emit(BitboxPairing(currentState.device));
+      final initOk = await (_pendingInit ?? Future.value(true)).timeout(
+        const Duration(seconds: 120),
+        onTimeout: () => false,
+      );
+      if (!initOk) throw Exception('pairing not confirmed on device');
       await _service.confirmPairing();
       final wallet = await _walletService.createBitboxWallet('Luke-Skywallet');
       _service.startConnectionStatusObserver();
       emit(BitboxConnected(wallet));
     } catch (e) {
       developer.log(e.toString(), name: '$ConnectBitboxCubit');
+      _pendingInit = null;
+      if (isClosed) return;
       emit(BitboxNotConnected());
       _checkForTimer = Timer.periodic(const Duration(milliseconds: 500), (_) => checkForBitbox());
     }
@@ -71,8 +109,9 @@ class ConnectBitboxCubit extends Cubit<BitboxConnectionState> {
   }
 
   @override
-  Future<void> close() async {
+  Future<void> close() {
     _checkForTimer?.cancel();
-    super.close();
+    _pendingInit = null;
+    return super.close();
   }
 }

@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'package:equatable/equatable.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:realunit_wallet/packages/hardware_wallet/bitbox.dart';
+import 'package:realunit_wallet/packages/hardware_wallet/bitbox_credentials.dart';
 import 'package:realunit_wallet/packages/service/app_store.dart';
 import 'package:realunit_wallet/packages/service/balance_service.dart';
 import 'package:realunit_wallet/packages/service/dfx/dfx_widget_service.dart';
@@ -135,6 +136,11 @@ class HomeBloc extends Bloc<HomeEvent, HomeState> {
   }
 
   Future<void> _setupFiatService(Emitter<HomeState> emit) async {
+    if (_appStore.wallet.currentAccount.primaryAddress is BitboxCredentials) {
+      // bitbox_flutter's ETHSignMessage panics on a NACK and crashes the engine.
+      emit(state.copyWith(isFiatServiceAvailable: false));
+      return;
+    }
     try {
       await _dfxService.getAuthToken();
       emit(state.copyWith(isFiatServiceAvailable: _dfxService.isAvailable));
