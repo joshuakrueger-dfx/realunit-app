@@ -16,7 +16,14 @@ import 'package:realunit_wallet/styles/colors.dart';
 import 'package:realunit_wallet/widgets/buttons/app_filled_button.dart';
 
 class KycEmailVerificationPage extends StatelessWidget {
-  const KycEmailVerificationPage({super.key});
+  /// When `true` the page was entered via the re-entrant resume path
+  /// (KycWalletRegistrationRequired) rather than pushed from the email step:
+  /// the auth-side merge already happened in a prior session, so the one-shot
+  /// account-id check is seeded as already-detected and success advances the
+  /// KYC flow in place (checkKyc) instead of popping a pushed route.
+  final bool mergeAlreadyConfirmed;
+
+  const KycEmailVerificationPage({super.key, this.mergeAlreadyConfirmed = false});
 
   @override
   Widget build(BuildContext context) {
@@ -35,14 +42,17 @@ class KycEmailVerificationPage extends StatelessWidget {
         // flip happens exactly when the EIP-712 sign succeeded, not
         // speculatively on a `true` pop.
         onSignProduced: kycCubit.markRegistrationSignProduced,
+        initialMergeDetected: mergeAlreadyConfirmed,
       ),
-      child: const KycEmailVerificationView(),
+      child: KycEmailVerificationView(mergeAlreadyConfirmed: mergeAlreadyConfirmed),
     );
   }
 }
 
 class KycEmailVerificationView extends StatelessWidget {
-  const KycEmailVerificationView({super.key});
+  final bool mergeAlreadyConfirmed;
+
+  const KycEmailVerificationView({super.key, this.mergeAlreadyConfirmed = false});
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +77,16 @@ class KycEmailVerificationView extends StatelessWidget {
           );
         }
         if (state is KycEmailVerificationSuccess) {
-          context.pop(true);
+          if (mergeAlreadyConfirmed) {
+            // Re-entrant resume: this view is rendered in place by
+            // KycViewManager (not a pushed route). Advance the KYC flow via
+            // checkKyc — the wallet is now registered, so the registration
+            // gate clears and the flow continues. Popping here would tear
+            // down the whole /kyc route.
+            context.read<KycCubit>().checkKyc();
+          } else {
+            context.pop(true);
+          }
         }
         if (state is KycEmailVerificationBitboxRequired) {
           // BL-006 — surface the reconnect sheet instead of a generic

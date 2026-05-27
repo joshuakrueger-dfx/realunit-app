@@ -53,6 +53,16 @@ class KycAccountMergeRequested extends KycState {
   const KycAccountMergeRequested();
 }
 
+/// The account is known (email set) but the locally-active wallet address is
+/// not yet in the account's registered `addresses`. Reached on app restart
+/// after a merge was interrupted before `registerWallet` completed: the email
+/// step is skipped (mail is set), so the merge-completion flow would otherwise
+/// be unreachable. Routes back into the email-verification page in re-entrant
+/// mode to finish the EIP-712 `registerWallet` association.
+class KycWalletRegistrationRequired extends KycState {
+  const KycWalletRegistrationRequired();
+}
+
 class KycUnsupportedStepFailure extends KycState {
   // Null when the backend says `PendingReview` but the step list contains no
   // `isRequired` step we can name — we still surface the failure (never a

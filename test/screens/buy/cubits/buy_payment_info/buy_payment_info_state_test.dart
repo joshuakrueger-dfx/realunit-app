@@ -61,7 +61,16 @@ void main() {
       final a = BuyPaymentInfoFailure(PaymentInfoError.kycRequired, requiredLevel: 30);
       final b = BuyPaymentInfoFailure(PaymentInfoError.kycRequired, requiredLevel: 30);
       expect(a, equals(b));
-      expect(a.props, [PaymentInfoError.kycRequired, 30]);
+      expect(a.props, [PaymentInfoError.kycRequired, 30, '']);
+    });
+
+    test('message participates in equality and props', () {
+      final a = BuyPaymentInfoFailure(PaymentInfoError.unknown, message: 'Forbidden resource');
+      final b = BuyPaymentInfoFailure(PaymentInfoError.unknown, message: 'Forbidden resource');
+      final c = BuyPaymentInfoFailure(PaymentInfoError.unknown);
+      expect(a, equals(b));
+      expect(a, isNot(equals(c)));
+      expect(a.props, [PaymentInfoError.unknown, null, 'Forbidden resource']);
     });
 
     test('null requiredLevel is allowed and equal across instances', () {

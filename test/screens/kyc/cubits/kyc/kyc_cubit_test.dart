@@ -22,12 +22,21 @@ class _MockRealUnitRegistrationService extends Mock implements RealUnitRegistrat
 UserKycDto _kycHeader({KycLevel level = KycLevel.level0}) =>
     UserKycDto(hash: 'h', level: level, dataComplete: false);
 
+// Lowercased so it matches the gate comparison in checkKyc, which compares
+// `_registrationService.walletAddress.toLowerCase()` against `user.addresses`.
+const _walletAddress = '0x1111111111111111111111111111111111111111';
+
 UserDto _user({
   String? mail = 'test@example.com',
   KycLevel headerLevel = KycLevel.level0,
+  // Default to the active wallet being already registered so the re-entrant
+  // merge-completion gate does NOT fire for the normal-flow tests. Tests that
+  // exercise the gate pass an address list that omits [_walletAddress].
+  List<String> addresses = const [_walletAddress],
 }) => UserDto(
   mail: mail,
   kyc: _kycHeader(level: headerLevel),
+  addresses: addresses,
 );
 
 KycStepDto _step(
@@ -85,6 +94,7 @@ void main() {
   setUp(() {
     kycService = _MockDfxKycService();
     registrationService = _MockRealUnitRegistrationService();
+    when(() => registrationService.walletAddress).thenReturn(_walletAddress);
   });
 
   KycCubit buildCubit() => KycCubit(kycService, registrationService);
@@ -103,6 +113,30 @@ void main() {
       expect: () => [
         const KycLoading(),
         const KycSuccess(currentStep: KycStep.email),
+      ],
+    );
+
+    blocTest<KycCubit, KycState>(
+      'emits KycWalletRegistrationRequired when email is set but the active '
+      'wallet address is not yet in the account addresses (interrupted-merge '
+      'resume gate)',
+      setUp: () {
+        when(() => kycService.getKycStatus()).thenAnswer(
+          (_) async => _kycStatus(level: KycLevel.level0),
+        );
+        // Email present, but the active wallet is NOT among the account's
+        // registered addresses → an earlier merge never completed
+        // registerWallet. Must route to the re-entrant completion instead of
+        // a fresh KYC step.
+        when(() => kycService.getUser()).thenAnswer(
+          (_) async => _user(addresses: const ['0xsomeotheraddress']),
+        );
+      },
+      build: buildCubit,
+      act: (cubit) => cubit.checkKyc(),
+      expect: () => [
+        const KycLoading(),
+        const KycWalletRegistrationRequired(),
       ],
     );
 

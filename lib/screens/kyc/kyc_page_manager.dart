@@ -7,6 +7,7 @@ import 'package:realunit_wallet/packages/service/dfx/real_unit_registration_serv
 import 'package:realunit_wallet/screens/kyc/cubits/kyc/kyc_cubit.dart';
 import 'package:realunit_wallet/screens/kyc/steps/2fa/kyc_2fa_page.dart';
 import 'package:realunit_wallet/screens/kyc/steps/email/kyc_email_page.dart';
+import 'package:realunit_wallet/screens/kyc/steps/email/subpages/kyc_email_verification_page.dart';
 import 'package:realunit_wallet/screens/kyc/steps/financial_data/kyc_financial_data_page.dart';
 import 'package:realunit_wallet/screens/kyc/steps/ident/kyc_ident_page.dart';
 import 'package:realunit_wallet/screens/kyc/steps/nationality/kyc_nationality_page.dart';
@@ -47,6 +48,13 @@ class KycViewManager extends StatelessWidget {
           message: S.of(context).kycUnsupportedStepDescription(stepName?.value ?? '-'),
         ),
         KycAccountMergeRequested() => const KycAccountMergePage(),
+        // Re-entrant merge completion (rendered in place, inside the KycCubit
+        // provider — so KycEmailVerificationPage resolves KycCubit without a
+        // pushed-route BlocProvider.value). mergeAlreadyConfirmed seeds the
+        // verification cubit so it skips the one-shot account-id check.
+        KycWalletRegistrationRequired() => const KycEmailVerificationPage(
+          mergeAlreadyConfirmed: true,
+        ),
         KycPending(:final pendingStep) => KycPendingPage(pendingStep: pendingStep),
         KycCompleted() => const KycCompletedPage(),
         KycSuccess(:final currentStep, :final urlOrToken) => switch (currentStep) {
@@ -62,9 +70,18 @@ class KycViewManager extends StatelessWidget {
           KycStep.twoFa => const Kyc2FaPage(),
           KycStep.ident => KycIdentPage(accessToken: urlOrToken ?? ''),
           KycStep.financialData => KycFinancialDataPage(url: urlOrToken ?? ''),
-          (_) => const Scaffold(),
+          // DfxApproval is a backend-side manual review step with no user
+          // action — the user has completed everything actionable and is
+          // waiting for DFX to approve. Render the pending/review screen
+          // instead of a blank Scaffold (previously fell through to the
+          // grey catch-all below).
+          KycStep.dfxApproval => const KycPendingPage(pendingStep: KycStep.dfxApproval),
         },
-        KycState() => const Scaffold(),
+        // Never render a blank grey Scaffold — surface the unhandled state so
+        // it is diagnosable on-device instead of looking like a hang.
+        KycState() => KycFailurePage(
+          message: 'Unhandled KYC state: ${state.runtimeType}',
+        ),
       },
     );
   }

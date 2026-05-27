@@ -73,10 +73,21 @@ class _KycEmailFormState extends State<KycEmailForm> {
             context.read<KycCubit>().checkKyc();
           }
           if (state.status == .mergeRequested) {
+            // KycCubit lives in the KycPageManager BlocProvider, which is an
+            // ancestor of THIS page but NOT of a route pushed onto the
+            // Navigator. Capture it here (where it resolves) and re-provide it
+            // into the pushed route via BlocProvider.value so
+            // KycEmailVerificationPage can wire its onSignProduced callback
+            // without a `Provider<KycCubit> not found` crash. `.value` does
+            // not own the cubit, so popping the route never closes it.
+            final kycCubit = context.read<KycCubit>();
             final isConfirmed = await Navigator.push<bool>(
               context,
               MaterialPageRoute<bool>(
-                builder: (BuildContext context) => const KycEmailVerificationPage(),
+                builder: (_) => BlocProvider<KycCubit>.value(
+                  value: kycCubit,
+                  child: const KycEmailVerificationPage(),
+                ),
               ),
             );
             if (isConfirmed == true && context.mounted) {

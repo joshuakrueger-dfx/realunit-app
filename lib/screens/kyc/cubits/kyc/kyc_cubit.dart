@@ -77,6 +77,25 @@ class KycCubit extends Cubit<KycState> {
         return;
       }
 
+      // Re-entrant merge-completion gate (BL — see ADR / PR notes). The email
+      // is set, so the email step (which is where a merge is normally
+      // detected and the verification page pushed) is skipped. If the active
+      // wallet address is NOT yet in the account's registered `addresses`,
+      // an earlier merge was interrupted before `registerWallet` completed —
+      // route into the verification page in re-entrant mode to finish it,
+      // instead of dropping the user into a fresh KYC step.
+      //
+      // ASSUMPTION (must be verified end-to-end): the backend lists the
+      // wallet address under `/v2/user.addresses` only AFTER `registerWallet`
+      // succeeds. If it appears earlier (on the auth-side merge), this gate
+      // never fires and the gap persists; if it never appears, this loops —
+      // hence the explicit verification call-out in the PR.
+      final walletAddress = _registrationService.walletAddress.toLowerCase();
+      if (!user.addresses.contains(walletAddress)) {
+        emit(const KycWalletRegistrationRequired());
+        return;
+      }
+
       // Edge case: email exists but level is < 10. Backend hasn't bumped the
       // level after a prior auto-registration attempt — re-fire it once.
       if (level < 10) {

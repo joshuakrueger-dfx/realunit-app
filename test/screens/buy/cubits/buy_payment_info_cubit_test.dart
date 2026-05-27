@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:realunit_wallet/packages/service/dfx/exceptions/api_exception.dart';
 import 'package:realunit_wallet/packages/service/dfx/exceptions/bitbox_exception.dart';
 import 'package:realunit_wallet/packages/service/dfx/exceptions/payment/buy_exceptions.dart';
 import 'package:realunit_wallet/packages/service/dfx/models/payment/buy/buy_payment_info.dart';
@@ -176,6 +177,33 @@ void main() {
 
       final f = cubit.state as BuyPaymentInfoFailure;
       expect(f.error, PaymentInfoError.unknown);
+    });
+
+    test('plain 403 ApiException (code UNKNOWN) → Failure(unknown), NOT registrationRequired',
+        () async {
+      // Regression guard: the backend returns a *structured*
+      // RegistrationRequiredException when a wallet genuinely needs RealUnit
+      // onboarding (see the test above). A bare 403 "Forbidden resource" with
+      // no structured code is a different authorization denial (account/role
+      // gating) and MUST surface as `unknown` — never be force-mapped to
+      // `registrationRequired`, which would dump an already-onboarded but
+      // backend-blocked user into the registration/KYC flow and dead-end them
+      // at "Fehler beim Laden".
+      when(() => service.getPaymentInfo(any(), currency: any(named: 'currency')))
+          .thenAnswer(
+        (_) async => throw const ApiException(
+          statusCode: 403,
+          code: 'UNKNOWN',
+          message: 'Forbidden resource',
+        ),
+      );
+
+      final cubit = build();
+      await cubit.getPaymentInfo(amount: '300');
+
+      final f = cubit.state as BuyPaymentInfoFailure;
+      expect(f.error, PaymentInfoError.unknown);
+      expect(f.message, contains('Forbidden resource'));
     });
 
     test('BitboxNotConnectedException → Failure(bitboxDisconnected)', () async {

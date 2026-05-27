@@ -5,10 +5,19 @@ class UserDto {
   final UserKycDto kyc;
   final UserCapabilitiesDto capabilities;
 
+  /// Lowercased blockchain addresses currently associated with this user
+  /// account (the `addresses[].address` list from `/v2/user`). Used to detect
+  /// whether the locally-active wallet is already registered with the account
+  /// — the stable, restart-survivable signal for resuming an incomplete
+  /// merge/registration (the JWT account-id delta is a one-shot signal that
+  /// cannot be re-derived after the auth-side merge has settled).
+  final List<String> addresses;
+
   const UserDto({
     this.mail,
     required this.kyc,
     this.capabilities = const UserCapabilitiesDto(),
+    this.addresses = const [],
   });
 
   factory UserDto.fromJson(Map<String, dynamic> json) {
@@ -18,6 +27,10 @@ class UserDto {
       capabilities: json['capabilities'] != null
           ? UserCapabilitiesDto.fromJson(json['capabilities'] as Map<String, dynamic>)
           : const UserCapabilitiesDto(),
+      addresses: (json['addresses'] as List<dynamic>?)
+              ?.map((a) => ((a as Map<String, dynamic>)['address'] as String).toLowerCase())
+              .toList() ??
+          const [],
     );
   }
 }

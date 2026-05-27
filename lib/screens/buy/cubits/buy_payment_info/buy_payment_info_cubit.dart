@@ -64,21 +64,34 @@ class BuyPaymentInfoCubit extends Cubit<BuyPaymentInfoState> {
             minAmount: paymentInfo.minVolume!,
           );
         }
-        return const BuyPaymentInfoFailure(PaymentInfoError.unknown);
+        return BuyPaymentInfoFailure(
+          PaymentInfoError.unknown,
+          message: paymentInfo.error ?? '',
+        );
       }
       return BuyPaymentInfoSuccess(paymentInfo);
     } on KycLevelRequiredException catch (e) {
       return BuyPaymentInfoFailure(
         PaymentInfoError.kycRequired,
+        message: e.toString(),
         requiredLevel: e.requiredLevel,
       );
-    } on RegistrationRequiredException {
-      return const BuyPaymentInfoFailure(PaymentInfoError.registrationRequired);
-    } on BitboxNotConnectedException {
-      return const BuyPaymentInfoFailure(PaymentInfoError.bitboxDisconnected);
+    } on RegistrationRequiredException catch (e) {
+      return BuyPaymentInfoFailure(
+        PaymentInfoError.registrationRequired,
+        message: e.toString(),
+      );
+    } on BitboxNotConnectedException catch (e) {
+      return BuyPaymentInfoFailure(
+        PaymentInfoError.bitboxDisconnected,
+        message: e.toString(),
+      );
     } catch (e) {
       developer.log(e.toString());
-      return const BuyPaymentInfoFailure(PaymentInfoError.unknown);
+      return BuyPaymentInfoFailure(
+        PaymentInfoError.unknown,
+        message: e.toString(),
+      );
     }
   }
 

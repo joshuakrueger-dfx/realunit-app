@@ -77,12 +77,18 @@ void main() {
 
   KycEmailVerificationCubit build({
     void Function()? onSignProduced,
+    bool initialMergeDetected = false,
+    int walletStatusRetries = 1,
+    Duration walletStatusRetryDelay = Duration.zero,
   }) =>
       KycEmailVerificationCubit(
         dfxService: auth,
         walletService: walletService,
         registrationService: registrationService,
         onSignProduced: onSignProduced,
+        initialMergeDetected: initialMergeDetected,
+        walletStatusRetries: walletStatusRetries,
+        walletStatusRetryDelay: walletStatusRetryDelay,
       );
 
   group('initial state', () {
@@ -132,6 +138,33 @@ void main() {
         isA<KycEmailVerificationSuccess>(),
       ],
       verify: (_) => verify(() => registrationService.registerWallet(_userData)).called(1),
+    );
+
+    blocTest<KycEmailVerificationCubit, KycEmailVerificationState>(
+      'initialMergeDetected (re-entrant resume) skips the one-shot account-id '
+      'check and goes straight to registerWallet → Success',
+      setUp: () {
+        when(() => walletService.getWalletStatus()).thenAnswer(
+          (_) async => RealUnitWalletStatusDto(
+            isRegistered: true,
+            realUnitUserDataDto: _userData,
+          ),
+        );
+        when(() => registrationService.registerWallet(any()))
+            .thenAnswer((_) async => RegistrationStatus.completed);
+      },
+      build: () => build(initialMergeDetected: true),
+      act: (c) => c.checkEmailVerification(),
+      expect: () => [
+        isA<KycEmailVerificationLoading>(),
+        isA<KycEmailVerificationSuccess>(),
+      ],
+      verify: (_) {
+        // The account-id delta is the one-shot signal that cannot be re-derived
+        // after a restart — re-entrant mode must NOT call it.
+        verifyNever(() => auth.getAuthToken());
+        verify(() => registrationService.registerWallet(_userData)).called(1);
+      },
     );
 
     blocTest<KycEmailVerificationCubit, KycEmailVerificationState>(

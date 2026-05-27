@@ -41,7 +41,12 @@ class BuyView extends StatefulWidget {
 }
 
 class _BuyViewState extends State<BuyView> {
-  final TextEditingController _amountController = TextEditingController();
+  // Pre-fill the default 300 immediately so the amount is shown from the
+  // first frame, independent of the brokerbot share-conversion round-trip.
+  // The converter still emits fiatText='300' (see BuyPage's onFiatChanged),
+  // and the loading→false listener re-syncs (no-op when already equal); but
+  // if that round-trip stalls, the field must not render blank.
+  final TextEditingController _amountController = TextEditingController(text: '300');
   final TextEditingController _resultController = TextEditingController();
 
   @override

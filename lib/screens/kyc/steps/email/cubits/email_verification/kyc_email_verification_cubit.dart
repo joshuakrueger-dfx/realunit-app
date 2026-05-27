@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:realunit_wallet/packages/service/dfx/dfx_auth_service.dart';
 import 'package:realunit_wallet/packages/service/dfx/exceptions/bitbox_exception.dart';
 import 'package:realunit_wallet/packages/service/dfx/real_unit_registration_service.dart';
+import 'package:realunit_wallet/packages/service/dfx/models/wallet/real_unit_wallet_status_dto.dart';
 import 'package:realunit_wallet/packages/service/dfx/real_unit_wallet_service.dart';
 import 'package:realunit_wallet/packages/utils/jwt_decoder.dart';
 import 'package:realunit_wallet/packages/wallet/error_mapper.dart';
@@ -43,17 +44,38 @@ class KycEmailVerificationCubit extends Cubit<KycEmailVerificationState> {
   // so that after the user reconnects the BitBox and retries, the JWT
   // account-id check runs again. Without the reset a reconnect-then-retry
   // would skip the auth-side step and fail mysteriously on a backend race.
-  bool _mergeDetected = false;
+  bool _mergeDetected;
+
+  // The merge-detected seed for this entry. On a BitBox-drop retry the latch
+  // resets to THIS value (not unconditionally `false`) so the re-entrant
+  // resume path keeps skipping the one-shot account-id check after a
+  // reconnect — re-running it post-merge would falsely report "email not
+  // confirmed" because the account id no longer changes.
+  final bool _initialMergeDetected;
 
   KycEmailVerificationCubit({
     required DFXAuthService dfxService,
     required RealUnitWalletService walletService,
     required RealUnitRegistrationService registrationService,
     void Function()? onSignProduced,
+    // Re-entrant resume path: when the merge was already confirmed on the
+    // auth side in a previous session (app restarted mid-merge), the one-shot
+    // JWT account-id delta can no longer be observed. Seed the latch as
+    // detected so checkEmailVerification skips straight to registerWallet.
+    bool initialMergeDetected = false,
+    // Bounded auto-retry for the post-merge user-data propagation race.
+    // Injectable so tests can drive the immediate-fail contract (retries: 1,
+    // zero delay) without waiting on real timers.
+    int walletStatusRetries = 4,
+    Duration walletStatusRetryDelay = const Duration(seconds: 2),
   }) : _dfxService = dfxService,
        _walletService = walletService,
        _registrationService = registrationService,
        _onSignProduced = onSignProduced,
+       _mergeDetected = initialMergeDetected,
+       _initialMergeDetected = initialMergeDetected,
+       _walletStatusRetries = walletStatusRetries,
+       _walletStatusRetryDelay = walletStatusRetryDelay,
        super(const KycEmailVerificationInitial());
 
   Future<void> checkEmailVerification() async {
@@ -99,23 +121,41 @@ class KycEmailVerificationCubit extends Cubit<KycEmailVerificationState> {
   /// [KycEmailVerificationRegistrationFailure] or
   /// [KycEmailVerificationBitboxRequired] so the listener can show the
   /// error to the user.
+  // Bounded auto-retry budget for the post-merge user-data propagation race.
+  // getWalletStatus is a side-effect-free GET, so polling it a few times is
+  // safe; this absorbs the common "auth merged, user-data not propagated yet"
+  // window without forcing the user to tap retry manually. Injected so tests
+  // run without real delays.
+  final int _walletStatusRetries;
+  final Duration _walletStatusRetryDelay;
+
   Future<bool> _completeRegistration(int generation) async {
     try {
-      final status = await _walletService.getWalletStatus();
-      if (isClosed || generation != _runGeneration) return false;
-      if (status.realUnitUserDataDto == null) {
-        // Backend race: the auth service reports the merged account while the
-        // user-data service hasn't propagated yet. Surface as a recoverable
-        // failure so the user can retry by tapping the confirmation button
-        // again — by then propagation will usually have completed, and the
-        // retry path skips the auth-side check thanks to `_mergeDetected`.
+      // Backend race: the auth service reports the merged account while the
+      // user-data service hasn't propagated `realUnitUserDataDto` yet. Poll a
+      // bounded number of times before giving up so the merge completes
+      // automatically in the common case instead of dead-ending on a manual
+      // retry. The `_mergeDetected` latch already guarantees a later manual
+      // retry skips the auth-side check, so a final failure here is still
+      // recoverable.
+      RealUnitWalletStatusDto? status;
+      for (var attempt = 0; attempt < _walletStatusRetries; attempt++) {
+        status = await _walletService.getWalletStatus();
+        if (isClosed || generation != _runGeneration) return false;
+        if (status.realUnitUserDataDto != null) break;
+        if (attempt < _walletStatusRetries - 1) {
+          await Future<void>.delayed(_walletStatusRetryDelay);
+          if (isClosed || generation != _runGeneration) return false;
+        }
+      }
+      if (status?.realUnitUserDataDto == null) {
         developer.log(
-          'getWalletStatus returned null realUnitUserDataDto after merge',
+          'getWalletStatus still null after $_walletStatusRetries attempts',
         );
         emit(const KycEmailVerificationRegistrationFailure());
         return false;
       }
-      await _registrationService.registerWallet(status.realUnitUserDataDto!);
+      await _registrationService.registerWallet(status!.realUnitUserDataDto!);
       if (isClosed || generation != _runGeneration) return false;
       return true;
     } on BitboxNotConnectedException {
@@ -126,7 +166,7 @@ class KycEmailVerificationCubit extends Cubit<KycEmailVerificationState> {
       // auth-side JWT account check (the backend may have rotated tokens
       // during the reconnect window).
       if (isClosed || generation != _runGeneration) return false;
-      _mergeDetected = false;
+      _mergeDetected = _initialMergeDetected;
       emit(const KycEmailVerificationBitboxRequired());
       return false;
     } on BitboxNotConnectedSignException {
@@ -135,7 +175,7 @@ class KycEmailVerificationCubit extends Cubit<KycEmailVerificationState> {
       // legacy exception import still routes through the typed
       // hierarchy. Resets `_mergeDetected` for the same reason.
       if (isClosed || generation != _runGeneration) return false;
-      _mergeDetected = false;
+      _mergeDetected = _initialMergeDetected;
       emit(const KycEmailVerificationBitboxRequired());
       return false;
     } catch (e) {
