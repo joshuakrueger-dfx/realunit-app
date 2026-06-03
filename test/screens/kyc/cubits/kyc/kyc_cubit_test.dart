@@ -919,6 +919,50 @@ void main() {
         });
       },
     );
+
+    // A slow refresh from the merge-processing waiting screen must NOT route the
+    // user to the error screen: when the watchdog fires and the previous state
+    // was KycMergeProcessing, the cubit returns to KycMergeProcessing instead of
+    // emitting KycFailure. Contrast with the watchdog test above (non-merge
+    // state -> KycFailure), which still holds.
+    test(
+      'stays on KycMergeProcessing instead of KycFailure when a refresh exceeds the timeout',
+      () {
+        fakeAsync((async) {
+          // Phase 1: backend reports MergeProcessing -> cubit reaches the waiting state.
+          when(() => kycService.getKycStatus()).thenAnswer(
+            (_) async => _kycStatus(
+              level: KycLevel.level20,
+              processStatus: KycProcessStatus.mergeProcessing,
+            ),
+          );
+          when(() => kycService.getUser()).thenAnswer((_) async => _user());
+
+          final cubit = buildCubit();
+          final states = <KycState>[];
+          final sub = cubit.stream.listen(states.add);
+
+          cubit.markLegalDisclaimerAccepted();
+          unawaited(cubit.checkKyc());
+          async.flushMicrotasks();
+
+          // Phase 2: refresh while the backend hangs past the 30s watchdog.
+          when(() => kycService.getKycStatus()).thenAnswer((_) => Completer<KycLevelDto>().future);
+          unawaited(cubit.checkKyc());
+          async.elapse(const Duration(seconds: 31));
+
+          expect(states, [
+            const KycLoading(),
+            const KycMergeProcessing(),
+            const KycLoading(),
+            const KycMergeProcessing(),
+          ]);
+
+          sub.cancel();
+          cubit.close();
+        });
+      },
+    );
   });
 
   group('$KycCubit context forwarding', () {

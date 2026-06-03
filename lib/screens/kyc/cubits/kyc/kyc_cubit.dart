@@ -45,11 +45,22 @@ class KycCubit extends Cubit<KycState> {
 
   Future<void> checkKyc({String? context}) async {
     _kycContext = context ?? _kycContext;
+    // The merge-processing waiting screen must survive a slow refresh: the
+    // backend may still be re-parenting the merge when the user taps refresh,
+    // and surfacing the watchdog timeout as KycFailure would route them to the
+    // error screen — the exact failure mode the waiting page exists to avoid.
+    // Captured before _runCheckKyc, which immediately replaces the state with
+    // KycLoading.
+    final wasMergeProcessing = state is KycMergeProcessing;
     final generation = ++_runGeneration;
     try {
       await _runCheckKyc(generation).timeout(_checkKycTimeout);
     } on TimeoutException {
       if (isClosed || generation != _runGeneration) return;
+      if (wasMergeProcessing) {
+        emit(const KycMergeProcessing());
+        return;
+      }
       emit(const KycFailure('KYC backend did not respond in time'));
     } catch (e) {
       if (isClosed || generation != _runGeneration) return;
